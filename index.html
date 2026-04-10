@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OddzCalc</title>
+<style>
+  body { background:#0f1623; color:white; font-family:Arial; margin:0; }
+  .topbar { background:#111a2b; padding:16px; text-align:center; font-size:22px; font-weight:bold; }
+  .tabs {
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    align-items:center;
+    padding:12px;
+    border-bottom:1px solid #2b3548;
+    background:#101726;
+  }
+  .tab {
+    flex:0 0 auto;
+    padding:10px 14px;
+    text-align:center;
+    cursor:pointer;
+    background:#141e30;
+    border:1px solid #2b3548;
+    border-radius:999px;
+    user-select:none;
+    white-space:nowrap;
+    font-size:14px;
+  }
+  .tab.active {
+    background:#182235;
+    border-color:#34d399;
+    box-shadow:inset 0 0 0 1px #34d399;
+  }
+  .content { padding:20px; }
+
+  .card { max-width:480px; margin:0 auto; background:#101726; padding:20px; border-radius:14px; }
+  .card.wide { max-width:920px; }
+
+  .row { display:flex; justify-content:space-between; gap:16px; margin-bottom:12px; flex-wrap:wrap; }
+  .col { flex:1; min-width:140px; }
+  label { font-size:13px; opacity:0.85; display:block; margin-bottom:6px; }
+  input { width:100%; padding:11px; background:#141e30; border:1px solid #273349; border-radius:6px; color:#d4e0f0; }
+  input:focus { border-color:#34d399; background:#111827; outline:none; }
+
+  .summary { margin-top:18px; border-top:1px solid #314054; padding-top:12px; display:flex; gap:16px; flex-wrap:wrap; font-size:15px; }
+  .summary div { flex:1; min-width:180px; }
+
+  .neg { color:#ff6b6b; font-weight:bold; }
+  .pos { color:#4cff92; font-weight:bold; }
+
+  button { background:#34d399; border:none; padding:10px 14px; border-radius:6px; cursor:pointer; font-weight:bold; margin:2px; }
+  button:hover { background:#2cb583; }
+
+  /* Live Arb table */
+  table { width:100%; border-collapse:collapse; margin-top:16px; }
+  th, td { padding:10px; border-bottom:1px solid #243047; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  th { font-size:13px; opacity:0.85; }
+
+  .muted { opacity:0.7; font-size:12px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#182235; border:1px solid #2b3548; }
+
+  .toggleRow { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .toggleRow input[type="checkbox"] { width:auto; transform:scale(1.15); }
+
+  .smallNote { font-size:12px; opacity:0.75; line-height:1.35; margin-top:6px; }
+
+  /* Mobile: let the table scroll instead of squishing */
+  .tableWrap { width:100%; overflow:auto; -webkit-overflow-scrolling:touch; border-radius:10px; }
+  .tableWrap::-webkit-scrollbar { height:10px; }
+  .tableWrap::-webkit-scrollbar-thumb { background:#273349; border-radius:999px; }
+
+  .navWrap { border-bottom:1px solid #2b3548; background:#101726; }
+  .mobileNav { display:none; padding:12px; }
+  .mobileLabel { font-size:13px; opacity:0.85; display:block; margin-bottom:6px; }
+  .calcSelect {
+    width:100%;
+    padding:11px 12px;
+    background:#141e30;
+    border:1px solid #273349;
+    border-radius:10px;
+    color:#d4e0f0;
+    font-size:14px;
+  }
+  .calcSelect:focus {
+    border-color:#34d399;
+    background:#111827;
+    outline:none;
+  }
+
+  @media (max-width: 640px) {
+    .topbar { font-size:20px; padding:14px; }
+    .content { padding:14px; }
+    .mobileNav { display:block; }
+    .tabs { display:none; }
+  }
+
+</style>
+</head>
+<body>
+<div class="topbar">OddzCalc</div>
+
+<!-- navigation is built dynamically -->
+<div class="navWrap">
+  <div class="mobileNav">
+    <label for="calcSelect" class="mobileLabel">Calculator</label>
+    <select id="calcSelect" class="calcSelect"></select>
+  </div>
+  <div class="tabs" id="tabs"></div>
+</div>
+<div class="content" id="content"></div>
+
+<script>
+/*** =========================
+ *  TOGGLE CALCULATORS HERE ✅
+ *  ========================= */
+const CALCS = [
+  { id:'arb',    label:'Arbitrage', enabled:true },
+  { id:'free',   label:'Free Play', enabled:true },
+  { id:'live',   label:'Live Arb',  enabled:true },   // ✅ now visible
+  { id:'am',     label:'AM ODDS', enabled:true },
+  { id:'risk',   label:'Risk-Free', enabled:false },
+  { id:'parlay', label:'Parlay',    enabled:true },
+];
+
+/*** =========================
+ *  HTML TEMPLATES (cards)
+ *  ========================= */
+const TEMPLATES = {
+  arb: `
+    <div id="arb" class="card" style="display:none;">
+      <div class="row">
+        <div class="col"><label>Odds</label><input id="arbOddsA" value="+110"></div>
+        <div class="col"><label>Odds</label><input id="arbOddsB" value="+110"></div>
+      </div>
+      <div class="row">
+        <div class="col"><label>Stake</label><input id="arbStakeA" value="100"></div>
+        <div class="col"><label>Stake</label><input id="arbStakeB" value="100"></div>
+      </div>
+      <div class="row">
+        <div class="col"><label>Payout</label><input id="arbPayA" readonly></div>
+        <div class="col"><label>Payout</label><input id="arbPayB" readonly></div>
+      </div>
+      <div class="summary">
+        <div>Total Stake<br><span id="arbTS">$0.00</span></div>
+        <div>Total Payout<br><span id="arbTP">$0.00</span></div>
+        <div>Profit <span id="arbROI">(0.00%)</span><br><span id="arbP">$0.00</span></div>
+      </div>
+    </div>
+  `,
+  free: `
+    <div id="free" class="card" style="display:none;">
+      <div class="row"><div class="col"><label>Free Play Amount</label><input id="fpAmt" placeholder="500"></div></div>
+      <div class="row"><div class="col"><label>Free Play Line</label><input id="fpLine" placeholder="+340"></div></div>
+      <div class="row"><div class="col"><label>Hedge Line</label><input id="fpHedge" placeholder="-290"></div></div>
+      <div class="summary">
+        <div>Hedge Bet<br><span id="fpHB">$0.00</span></div>
+        <div>$ Profit<br><span id="fpPROF" class="pos">$0.00</span></div>
+        <div>% Profit<br><span id="fpPCT">0.00%</span></div>
+      </div>
+    </div>
+  `,
+  live: `
+    <div id="live" class="card wide" style="display:none;">
+      <div class="row">
+        <div class="col">
+          <div style="font-weight:bold; margin-bottom:8px;">Left Side (A) Anchor</div>
+          <label>Left Odds (A)</label>
+          <input id="oddsA" value="+110">
+          <div class="muted" style="margin-top:6px;">Example: +110</div>
+
+          <div style="height:10px;"></div>
+
+          <label>Left Stake (A)</label>
+          <input id="stakeA" value="100">
+
+          <div style="height:10px;"></div>
+
+          <label>Left Payout (A)</label>
+          <input id="payoutA" readonly>
+        </div>
+
+        <div class="col">
+          <div style="font-weight:bold; margin-bottom:8px;">Right Side (B) Hedge</div>
+          <label>Current Right Odds (B)</label>
+          <input id="oddsB" value="+145">
+          <div class="muted" style="margin-top:6px;">Current odds</div>
+
+          <div style="height:10px;"></div>
+
+          <label>Hedge Stake (B)</label>
+          <input id="stakeB" readonly>
+
+          <div style="height:10px;"></div>
+
+          <label>Right Payout (B)</label>
+          <input id="payoutB" readonly>
+        </div>
+
+        <div class="col">
+          <div style="font-weight:bold; margin-bottom:8px;">Projection Settings</div>
+
+          <label># of Lines</label>
+          <input id="projCount" value="10">
+
+          <div style="height:10px;"></div>
+
+          <label>Step (+ odds per line)</label>
+          <input id="projStep" value="10">
+
+          <div class="toggleRow">
+            <input id="allowNeg" type="checkbox">
+            <label for="allowNeg" style="margin:0;">Allow negative odds</label>
+          </div>
+
+          <div class="smallNote">
+            Default is <b>positive only</b>. Turn on “Allow negative odds” to use inputs like <b>-110</b>.
+            <br>
+            If Right Odds are <b>negative</b>, projections will trend <b>toward -101</b>, then flip into <b>positive</b>
+            (e.g., -150, -140, -130, -120, -110, -101, +100, +110…).
+          </div>
+        </div>
+      </div>
+
+      <div class="summary" style="margin-top:14px;">
+        <div><span class="pill">Total Stake</span><br><span id="totStake">$0.00</span></div>
+        <div><span class="pill">Payout</span><br><span id="totPay">$0.00</span></div>
+        <div><span class="pill">Profit</span><br><span id="profit" class="pos">$0.00</span> <span id="roi" class="muted"></span></div>
+      </div>
+
+      <div style="margin-top:18px;">
+        <div class="row" style="align-items:center;">
+          <div class="col">
+            <div style="font-weight:bold;">Right Odds (B)</div>
+            <div class="muted">Auto-generated from current right odds using Count + Step.</div>
+          </div>
+          <div class="col" style="text-align:right;">
+            <span class="pill" id="modePill">positive odds only</span>
+          </div>
+        </div>
+
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Odds (B)</th>
+                <th>Hedge Stake (B)</th>
+                <th>Payout B</th>
+                <th>Profit</th>
+              </tr>
+            </thead>
+            <tbody id="projBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `,
+  am: `
+    <div id="am" class="card" style="display:none;">
+      <div class="row">
+        <div class="col">
+          <label>Wager / Cost ($)</label>
+          <input id="amWager" value="100">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label>Total Payout ($)</label>
+          <input id="amPayout" value="250">
+        </div>
+      </div>
+
+      <div class="summary">
+        <div>
+          <span class="pill">Profit</span><br>
+          <span id="amProfit">$150.00</span>
+        </div>
+        <div>
+          <span class="pill">American Odds</span><br>
+          <span id="amOdds" class="pos">+150</span>
+        </div>
+      </div>
+
+      <div class="muted" style="margin-top:10px;">
+        Payout includes your original stake.
+      </div>
+    </div>
+  `,
+  risk: `
+    <div id="risk" class="card" style="display:none;">
+      <div class="row"><div class="col"><label>Risk-Free Stake</label><input id="rfStake" placeholder="100"></div></div>
+      <div class="row"><div class="col"><label>Main Bet Odds</label><input id="rfOdds" placeholder="-120"></div></div>
+      <div class="row"><div class="col"><label>Hedge Line</label><input id="rfHedge" placeholder="+140"></div></div>
+      <div class="summary">
+        <div>Hedge Bet<br><span id="rfHB">$0.00</span></div>
+        <div>Guaranteed Profit<br><span id="rfPROF" class="pos">$0.00</span></div>
+        <div>% ROI<br><span id="rfROI">0.00%</span></div>
+      </div>
+    </div>
+  `,
+  parlay: `
+    <div id="parlay" class="card" style="display:none;">
+      <div id="parlayInputs">
+        <div class="row"><div class="col"><label>Leg 1 Odds</label><input class="parlayOdd" placeholder="+150"></div></div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <button type="button" onclick="addLeg()">+ Add Leg</button>
+          <button type="button" onclick="removeLeg()">− Remove Last</button>
+          <button type="button" onclick="resetParlay()">🔁 Reset</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col"><label>Stake Amount</label><input id="parlayStake" placeholder="100"></div>
+      </div>
+      <div class="summary">
+        <div>Parlay Odds<br><span id="parlayTotal">+100</span></div>
+        <div>Total Profit<br><span id="parlayReturn">$0.00</span></div>
+        <div>Total Payout<br><span id="parlayProfit" class="pos">$0.00</span></div>
+      </div>
+    </div>
+  `
+};
+
+/*** =========================
+ *  Build UI from CALCS
+ *  ========================= */
+const enabled = CALCS.filter(c => c.enabled);
+
+function buildUI(){
+  const tabs = document.getElementById('tabs');
+  const content = document.getElementById('content');
+  const calcSelect = document.getElementById('calcSelect');
+  tabs.innerHTML = '';
+  content.innerHTML = '';
+  if (calcSelect) calcSelect.innerHTML = '';
+
+  enabled.forEach((c, i) => {
+    const tab = document.createElement('div');
+    tab.className = 'tab' + (i===0 ? ' active' : '');
+    tab.textContent = c.label;
+    tab.onclick = () => showTab(c.id);
+    tabs.appendChild(tab);
+
+    if (calcSelect){
+      const option = document.createElement('option');
+      option.value = c.id;
+      option.textContent = c.label;
+      calcSelect.appendChild(option);
+    }
+
+    content.insertAdjacentHTML('beforeend', TEMPLATES[c.id] || '');
+  });
+
+  if (calcSelect){
+    calcSelect.onchange = () => showTab(calcSelect.value);
+  }
+
+  initAll();
+
+  if(enabled[0]) showTab(enabled[0].id);
+}
+
+function showTab(id){
+  const tabEls = document.querySelectorAll('#tabs .tab');
+  tabEls.forEach(t => t.classList.remove('active'));
+  const idx = enabled.findIndex(c => c.id === id);
+  if(idx >= 0 && tabEls[idx]) tabEls[idx].classList.add('active');
+
+  const calcSelect = document.getElementById('calcSelect');
+  if (calcSelect) calcSelect.value = id;
+
+  enabled.forEach(c => {
+    const el = document.getElementById(c.id);
+    if(el) el.style.display = (c.id === id) ? 'block' : 'none';
+  });
+
+  // Recalc live when opened (helps if it was hidden on load)
+  if(id === 'live') updateLiveAll();
+}
+
+/*** =========================
+ *  Shared Odds Utilities
+ *  ========================= */
+function parseOdds(v){ v=(v||'').toString().trim(); if(v.startsWith('+')) v=v.slice(1); return Number(v); }
+function mult(o){ return o>0 ? 1+o/100 : 1+100/Math.abs(o); }
+
+/*** =========================
+ *  Calculator Inits
+ *  ========================= */
+function initAll(){
+  if(document.getElementById('arb'))    initArb();
+  if(document.getElementById('free'))   initFree();
+  if(document.getElementById('live'))   initLive();
+  if(document.getElementById('am'))     initOddsFromPayout();
+  if(document.getElementById('risk'))   initRisk();
+  if(document.getElementById('parlay')) initParlay();
+}
+
+/* ------------ Arbitrage ------------ */
+function initArb(){
+  let arbLast='A', lock=false;
+
+  function arbCalc(){
+    if(lock) return;
+    lock=true;
+
+    const oA=parseOdds(arbOddsA.value);
+    const oB=parseOdds(arbOddsB.value);
+    let sA=Number(arbStakeA.value);
+    let sB=Number(arbStakeB.value);
+
+    if(isNaN(oA)||isNaN(oB)||isNaN(sA)||isNaN(sB)){ lock=false; return; }
+
+    const mA=mult(oA), mB=mult(oB);
+    let pA, pB;
+
+    if(arbLast==='A'){
+      pA=sA*mA;
+      sB=pA/mB;
+      pB=sB*mB;
+      arbStakeB.value=sB.toFixed(2);
+    } else {
+      pB=sB*mB;
+      sA=pB/mA;
+      pA=sA*mA;
+      arbStakeA.value=sA.toFixed(2);
+    }
+
+    arbPayA.value=pA.toFixed(2);
+    arbPayB.value=pB.toFixed(2);
+
+    const tS=sA+sB;
+    const tP=Math.max(pA,pB);
+    const pr=tP-tS;
+    const roi=(pr/tS)*100;
+
+    arbTS.textContent='$'+tS.toFixed(2);
+    arbTP.textContent='$'+tP.toFixed(2);
+    arbP.textContent='$'+pr.toFixed(2);
+    arbROI.textContent='('+roi.toFixed(2)+'%)';
+    arbP.classList.toggle('neg', pr<0);
+
+    lock=false;
+  }
+
+  arbOddsA.oninput=arbCalc;
+  arbOddsB.oninput=arbCalc;
+  arbStakeA.oninput=()=>{arbLast='A'; arbCalc();};
+  arbStakeB.oninput=()=>{arbLast='B'; arbCalc();};
+  arbCalc();
+}
+
+/* ------------ Free Play ------------ */
+function initFree(){
+  function fpCalc(){
+    const fp=parseFloat(fpAmt.value);
+    let fpL=fpLine.value.trim(), hL=fpHedge.value.trim();
+    if(isNaN(fp)||!fpL||!hL) return;
+
+    if(fpL.startsWith('+')) fpL=fpL.slice(1);
+    const fpOdds=Number(fpL);
+    const fpMult=fpOdds>0 ? fpOdds/100 : 100/Math.abs(fpOdds);
+    const fpWin=fp*fpMult;
+
+    if(hL.startsWith('+')) hL=hL.slice(1);
+    const hOdds=Number(hL);
+
+    let hStake;
+    if(hOdds<0) hStake=fpWin/(1+(100/Math.abs(hOdds)));
+    else hStake=fpWin/(1+(hOdds/100));
+
+    const prof=fpWin-hStake;
+    const pct=(prof/fp)*100;
+
+    fpHB.textContent='$'+hStake.toFixed(2);
+    fpPROF.textContent='$'+prof.toFixed(2);
+    fpPCT.textContent=pct.toFixed(2)+'%';
+  }
+
+  fpAmt.oninput=fpCalc;
+  fpLine.oninput=fpCalc;
+  fpHedge.oninput=fpCalc;
+  fpCalc();
+}
+
+/* ------------ Live Arb ------------ */
+function parseOddsRaw(v){
+  v = (v ?? '').toString().trim();
+  if(!v) return NaN;
+  if(v.startsWith('+')) v = v.slice(1);
+  return Number(v);
+}
+function money(n){ return '$' + (isFinite(n) ? n.toFixed(2) : '0.00'); }
+function toAmericanText(n){
+  if(!isFinite(n)) return '';
+  return (n >= 0 ? '+' : '') + Math.trunc(n);
+}
+function calcForOddsLive(oddA, stakeA, oddB){
+  const mA = mult(oddA);
+  const mB = mult(oddB);
+
+  const payA = stakeA * mA;
+  const stakeB = payA / mB;
+  const payB = stakeB * mB;
+
+  const totalStake = stakeA + stakeB;
+  const guaranteedPayout = Math.min(payA, payB);
+  const profit = guaranteedPayout - totalStake;
+  const roi = totalStake ? (profit/totalStake*100) : 0;
+
+  return { payA, stakeB, payB, totalStake, guaranteedPayout, profit, roi };
+}
+function validateOdds(n, allowNeg){
+  if(!isFinite(n)) return false;
+  if(n === 0) return false;
+  if(!allowNeg && n < 0) return false;
+  return true;
+}
+
+/**
+ * Projection rule:
+ * - If start is positive: +145, +155, +165...
+ * - If start is negative: trend toward -101, then flip to +100 and continue up
+ *   Example: -150, -140, -130, -120, -110, -101, +100, +110, +120...
+ */
+function projectedOddsSeries(startOdd, count, step){
+  const out = [];
+  let cur = startOdd;
+
+  for(let i=0;i<count;i++){
+    out.push(cur);
+
+    if(cur >= 0){
+      cur = cur + step;
+      continue;
+    }
+
+    // cur is negative
+    const next = cur + step; // less negative (toward zero)
+
+    // If we are still below -101, keep going
+    if(next < -101){
+      cur = next;
+      continue;
+    }
+
+    // If we hit or cross the -101 boundary, flip to positive
+    // Treat -101 as +100, then continue +step.
+    // Example: cur=-110 step=10 -> next=-100 crosses -> flip to +100
+    cur = 100; // first positive after the negative run
+  }
+
+  return out;
+}
+
+function buildProjectionTable(startOdd, count, step, oddA, stakeA){
+  const tb = document.getElementById('projBody');
+  if(!tb) return;
+  tb.innerHTML = '';
+
+  const series = projectedOddsSeries(startOdd, count, step);
+
+  series.forEach(projOdd => {
+    const res = calcForOddsLive(oddA, stakeA, projOdd);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="text-align:left;">${toAmericanText(projOdd)}</td>
+      <td>${money(res.stakeB)}</td>
+      <td>${money(res.payB)}</td>
+      <td class="${res.profit<0?'neg':'pos'}">${money(res.profit)}</td>
+    `;
+    tb.appendChild(tr);
+  });
+}
+
+function updateLiveAll(){
+  // If live tab not present, skip
+  if(!document.getElementById('live')) return;
+
+  const allowNegEl = document.getElementById('allowNeg');
+  const modePillEl = document.getElementById('modePill');
+
+  const allowNeg = !!(allowNegEl && allowNegEl.checked);
+  if(modePillEl) modePillEl.textContent = allowNeg ? 'positive + negative odds' : 'positive odds only';
+
+  const oddA = parseOddsRaw((oddsA && oddsA.value) || '');
+  const oddB = parseOddsRaw((oddsB && oddsB.value) || '');
+  const sA = parseFloat((stakeA && stakeA.value) || '');
+
+  const count = Math.max(1, parseInt((projCount && projCount.value) || '10', 10));
+  const step  = Math.max(1, parseInt((projStep && projStep.value) || '10', 10));
+
+  const ok =
+    validateOdds(oddA, allowNeg) &&
+    validateOdds(oddB, allowNeg) &&
+    isFinite(sA) && sA > 0;
+
+  if(!ok){
+    if(payoutA) payoutA.value = '';
+    if(stakeB) stakeB.value = '';
+    if(payoutB) payoutB.value = '';
+    if(totStake) totStake.textContent = '$0.00';
+    if(totPay) totPay.textContent = '$0.00';
+    if(profit) profit.textContent = '$0.00';
+    if(roi) roi.textContent = '';
+    const tb = document.getElementById('projBody');
+    if(tb) tb.innerHTML = '';
+    return;
+  }
+
+  const cur = calcForOddsLive(oddA, sA, oddB);
+
+  payoutA.value = cur.payA.toFixed(2);
+  stakeB.value = cur.stakeB.toFixed(2);
+  payoutB.value = cur.payB.toFixed(2);
+
+  totStake.textContent = money(cur.totalStake);
+  totPay.textContent = money(cur.guaranteedPayout);
+
+  profit.textContent = money(cur.profit);
+  profit.className = cur.profit < 0 ? 'neg' : 'pos';
+  roi.textContent = `(${cur.roi.toFixed(2)}%)`;
+
+  buildProjectionTable(oddB, count, step, oddA, sA);
+}
+
+function initLive(){
+  document.addEventListener('input', (e) => {
+    const ids = new Set(['oddsA','oddsB','stakeA','projCount','projStep','allowNeg']);
+    if(e && e.target && ids.has(e.target.id)){
+      updateLiveAll();
+    }
+  });
+  updateLiveAll();
+}
+
+/* ------------ AM ODDS ------------ */
+function initOddsFromPayout(){
+  function amCalc(){
+    const wager = parseFloat((amWager && amWager.value) || '');
+    const payout = parseFloat((amPayout && amPayout.value) || '');
+
+    if(!isFinite(wager) || wager <= 0 || !isFinite(payout) || payout <= 0 || payout <= wager){
+      amOdds.textContent = '-';
+      amOdds.className = '';
+      amProfit.textContent = '$0.00';
+      return;
+    }
+
+    const profit = payout - wager;
+    let oddsText = '';
+    let oddsClass = '';
+
+    if(profit >= wager){
+      const oddsValue = (profit / wager) * 100;
+      oddsText = '+' + oddsValue.toFixed(0);
+      oddsClass = 'pos';
+    } else {
+      const oddsValue = -(wager / profit) * 100;
+      oddsText = oddsValue.toFixed(0);
+      oddsClass = 'neg';
+    }
+
+    amProfit.textContent = '$' + profit.toFixed(2);
+    amOdds.textContent = oddsText;
+    amOdds.className = oddsClass;
+  }
+
+  amWager.oninput = amCalc;
+  amPayout.oninput = amCalc;
+  amCalc();
+}
+
+/* ------------ Risk-Free ------------ */
+function initRisk(){
+  function rfCalc(){
+    const S=parseFloat(rfStake.value);
+    let od=rfOdds.value.trim(), h=rfHedge.value.trim();
+    if(isNaN(S)||!od||!h) return;
+
+    if(od.startsWith('+')) od=od.slice(1);
+    const o=Number(od);
+    const m=o>0 ? 1+o/100 : 1+100/Math.abs(o);
+
+    const Mw=S*m;
+    const bonusConversion=0.635;
+    const G=S*bonusConversion;
+    const Hb=Mw - S - G;
+
+    rfHB.textContent='$'+Hb.toFixed(2);
+    rfPROF.textContent='$'+G.toFixed(2);
+    rfROI.textContent=(G/S*100).toFixed(2)+'%';
+  }
+
+  rfStake.oninput=rfCalc;
+  rfOdds.oninput=rfCalc;
+  rfHedge.oninput=rfCalc;
+  rfCalc();
+}
+
+/* ------------ Parlay ------------ */
+function parseAmerican(odds){
+  if(typeof odds==='string' && odds.trim().startsWith('+')) odds=odds.trim().slice(1);
+  odds=parseFloat(odds);
+  if(isNaN(odds)) return 1;
+  return odds>0 ? 1+odds/100 : 1+100/Math.abs(odds);
+}
+function toAmerican(decimal){
+  if(!isFinite(decimal) || decimal<=1) return '+0';
+  if(decimal>=2) return '+'+((decimal-1)*100).toFixed(0);
+  return '-'+(100/(decimal-1)).toFixed(0);
+}
+
+function initParlay(){
+  updateParlay();
+  document.addEventListener('input', e => {
+    if(e.target.classList.contains('parlayOdd') || e.target.id==='parlayStake'){
+      updateParlay();
+    }
+  });
+}
+
+function addLeg(){
+  const container=document.getElementById('parlayInputs');
+  const count=container.querySelectorAll('.parlayOdd').length+1;
+  const row=document.createElement('div');
+  row.className='row';
+  row.innerHTML=`<div class="col"><label>Leg ${count} Odds</label><input class="parlayOdd" placeholder="+100"></div>`;
+  container.appendChild(row);
+  updateParlay();
+}
+function removeLeg(){
+  const container=document.getElementById('parlayInputs');
+  const rows=container.querySelectorAll('.row');
+  if(rows.length>1) container.removeChild(rows[rows.length-1]);
+  updateParlay();
+}
+function resetParlay(){
+  const container=document.getElementById('parlayInputs');
+  container.innerHTML=`<div class="row"><div class="col"><label>Leg 1 Odds</label><input class="parlayOdd" placeholder="+150"></div></div>`;
+  const stake=document.getElementById('parlayStake');
+  if(stake) stake.value='';
+  updateParlay();
+}
+function updateParlay(){
+  const oddsInputs=document.querySelectorAll('.parlayOdd');
+  let total=1;
+  oddsInputs.forEach(o => { total *= parseAmerican((o.value||'').trim()); });
+
+  const stake=parseFloat((parlayStake && parlayStake.value) || '') || 0;
+  const payout=stake*total;
+  const profit=payout-stake;
+
+  parlayTotal.textContent=toAmerican(total);
+  parlayReturn.textContent='$'+profit.toFixed(2);
+  parlayProfit.textContent='$'+payout.toFixed(2);
+}
+
+/*** boot ***/
+buildUI();
+</script>
+</body>
+</html>
